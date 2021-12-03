@@ -54,9 +54,10 @@ export type ErrorLocations = Map<string, Set<string>>
 
 declare global {
     interface Window {
-        pyodide: any,
         loadPyodide: any,
         dataLayer: any,
         gtag: any,
     }
+    const loadPyodide: any;
 };
+

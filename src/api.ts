@@ -1,10 +1,14 @@
-import { ValidatedData, UploadedFile, ErrorSelected, UploadMetadata } from './types';
+import {ValidatedData, UploadedFile, ErrorSelected, UploadMetadata} from './types';
 import {public_key} from "./helpers/postcodeSignature";
 import {captureException} from "./helpers/sentry";
+import dayjs from "dayjs";
+import {saveAs} from "file-saver";
+
+importScripts("https://cdn.jsdelivr.net/pyodide/v0.18.1/full/pyodide.js");
+
+let pyodide: any;
 
 export async function handleUploaded903Data(uploadedFiles: Array<UploadedFile>, selectedErrors: Array<ErrorSelected>, metadata: UploadMetadata): Promise<[ValidatedData, Array<any>]> {
-  const pyodide = window.pyodide;
-
   console.log('Passing uploaded data to Pyodide...');
   pyodide.globals.set("uploaded_files", uploadedFiles);
   pyodide.globals.set("error_codes", selectedErrors.filter(e => e.selected).map(({ code }) => code));
@@ -54,24 +58,24 @@ export async function handleUploaded903Data(uploadedFiles: Array<UploadedFile>, 
   return [{ data, errors, errorDefinitions }, uploadErrors]
 }
 
-export async function loadPyodide() {
-  if (!window.pyodide?.runPython) {
-    window.pyodide = await window.loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.18.0/full/" });
-    await window.pyodide.loadPackage(['micropip']);
+export async function workerLoadPyodide() {
+  if (!pyodide?.runPython) {
+    pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.18.1/full/" });
+    await pyodide.loadPackage(['micropip']);
     console.log('Loaded pyodide, now loading custom library...');
 
-    window.pyodide.globals.set("pc_pubkey", public_key);
-    await window.pyodide.runPythonAsync(`
+    pyodide.globals.set("pc_pubkey", public_key);
+    await pyodide.runPythonAsync(`
       import os
       os.environ["QLACREF_PC_KEY"] = pc_pubkey
     `);
 
     if (process.env.REACT_APP_MICROPIP_MODULES) {
       const extra_modules = process.env.REACT_APP_MICROPIP_MODULES.split(" ")
-      window.pyodide.globals.set("micropip_extra_modules", extra_modules);
+      pyodide.globals.set("micropip_extra_modules", extra_modules);
     }
 
-    await window.pyodide.runPythonAsync(`
+    await pyodide.runPythonAsync(`
       import micropip
       import logging
       logging.basicConfig(level=logging.INFO)
@@ -92,21 +96,53 @@ export async function loadPyodide() {
 }
 
 export async function loadErrorDefinitions(): Promise<Array<ErrorSelected>> {
-  const pyodide = window.pyodide;
   await pyodide.runPythonAsync(`
     from validator903.config import errors as configured_errors
+    import json
     all_error_definitions = [definition[0] for definition in configured_errors.values()]
+    all_error_definitions = [{
+      'code': e.code,
+      'description': e.description,
+      'affectedFields': e.affected_fields,
+      'selected': True,
+    } for e in all_error_definitions]
+    all_error_definitions = json.dumps(all_error_definitions)
   `);
-
-  let errorDefinitionsPy: any = window.pyodide.globals.get("all_error_definitions");
-  let errorDefinitions: Array<ErrorSelected> = [];
-  for (let error of errorDefinitionsPy) {
-    errorDefinitions.push({
-      code: error.code,
-      description: error.description,
-      affectedFields: error.affected_fields,
-      selected: true,
-    })
-  }
-  return errorDefinitions
+  return JSON.parse(pyodide.globals.get("all_error_definitions"));
 }
+
+
+export const saveErrorSummary = async (report_type: string) => {
+  const time = dayjs().format('YYYYMMDD-HHmmss')
+  const report_name = report_type === "ChildErrorSummary" ? 'children' : 'errors';
+  try {
+    const report = pyodide.globals.get("report");
+    const report_data = report.csv_report(report_name);
+    let errorSummaryContent = new Blob([report_data],
+        {type: 'text/csv'});
+    report.destroy()
+    saveAs(errorSummaryContent, `${report_type}-${time}.csv`);
+  } catch (error) {
+    console.error('Caught Error!', error)
+    const pythonError = (error as Error).toString()
+    captureException(error, {pythonError})
+  }
+}
+
+export const saveExcelSummary = async () => {
+  const time = dayjs().format('YYYYMMDD-HHmmss')
+  try {
+    const report = pyodide.globals.get("report");
+    const report_data = report.excel_report()
+    let errorSummaryContent = new Blob([report_data.toJs],
+        {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    report.destroy()
+    report_data.destroy()
+    saveAs(errorSummaryContent, `ErrorReport-${time}.xlsx`);
+  } catch (error) {
+    console.error('Caught Error!', error)
+    const pythonError = (error as Error).toString()
+    captureException(error, {pythonError})
+  }
+}
+

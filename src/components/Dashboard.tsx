@@ -1,7 +1,7 @@
 import * as GovUK from 'govuk-react';
 import { Spinner } from '@govuk-react/icons';
 import React, { useCallback, useEffect, useState } from 'react';
-import { handleUploaded903Data, loadErrorDefinitions, loadPyodide } from '../api';
+import { handleUploaded903Data, loadErrorDefinitions, loadPyodide, saveErrorSummary } from './apiWrapper';
 import Validator from "./Validator";
 import Uploader from "./Uploader";
 import {
@@ -12,9 +12,6 @@ import {
   ValidatedData
 } from '../types';
 import { useMemo } from 'react';
-import {
-  saveErrorSummary,
-} from "../helpers/report/childErrorReport";
 import {laData} from "../helpers/authorityData";
 import {event} from "../helpers/googleAnalytics";
 
@@ -33,7 +30,8 @@ export default function Dashboard() {
     (async () => {
       await loadPyodide();
       event('pyodide', 'loaded')
-      let selectedErrors = await loadErrorDefinitions();
+      setLoadingText("Loading rules...");
+      const selectedErrors = await loadErrorDefinitions();
       setSelectedErrors(selectedErrors);
       setLoadingText("");
     })();
