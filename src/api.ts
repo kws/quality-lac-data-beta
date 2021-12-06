@@ -4,7 +4,9 @@ import {captureException} from "./helpers/sentry";
 import dayjs from "dayjs";
 import {saveAs} from "file-saver";
 
-importScripts("https://cdn.jsdelivr.net/pyodide/v0.18.1/full/pyodide.js");
+const pyodideVersion = "0.18.1";
+
+importScripts(`https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/pyodide.js`);
 
 let pyodide: any;
 
@@ -32,14 +34,16 @@ export async function handleUploaded903Data(uploadedFiles: Array<UploadedFile>, 
         cr = report.child_report
         print("Child report generated")
         
-        js_files = {k: [t._asdict() for t in df.itertuples(index=True)] for k, df in validator.dfs.items()}
-        
+        #js_files = {k: [t._asdict() for t in df.itertuples(index=True)] for k, df in validator.dfs.items()}
+        js_files = {k: json.loads(df.to_json(orient='index')) for k, df in validator.dfs.items()}
+
         error_definitions = {code: asdict(definition[0]) for code, definition in configured_errors.items()}
 
         errors = {}
         for row in report.child_report.itertuples():
             errors.setdefault(row.Table, {}).setdefault(row.RowID, []).append(row.Code)
-                
+            
+        validation_result = json.dumps(dict(data=js_files, errors=errors, errorDefinitions=error_definitions))
       `);
   } catch (error) {
       console.error('Caught Error!', error)
@@ -49,20 +53,24 @@ export async function handleUploaded903Data(uploadedFiles: Array<UploadedFile>, 
       uploadErrors.push(errorLines[errorLines.length - 2]);
   }
 
-  const data = pyodide.globals.get("js_files")?.toJs();
-  const errors = pyodide.globals.get("errors")?.toJs();
-  const errorDefinitions = pyodide.globals.get("error_definitions")?.toJs();
+  // const data = pyodide.globals.get("js_files")?.toJs();
+  // const errors = pyodide.globals.get("errors")?.toJs();
+  // const errorDefinitions = pyodide.globals.get("error_definitions")?.toJs();
+  const validationResult = pyodide.globals.get("validation_result");
 
-  console.log('Python calculation complete.')
+  console.log('Python calculation complete.', validationResult)
 
-  return [{ data, errors, errorDefinitions }, uploadErrors]
+  return [JSON.parse(validationResult || "{}"), uploadErrors]
 }
 
-export async function workerLoadPyodide() {
+export async function workerLoadPyodide(id: bigint) {
+  const setText = (text: string) => {
+    postMessage({text, id, type: 'TEXT'})
+  }
   if (!pyodide?.runPython) {
-    pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.18.1/full/" });
+    pyodide = await loadPyodide({ indexURL: `https://cdn.jsdelivr.net/pyodide/v${pyodideVersion}/full/` });
+    setText("Loading standard libraries...");
     await pyodide.loadPackage(['micropip']);
-    console.log('Loaded pyodide, now loading custom library...');
 
     pyodide.globals.set("pc_pubkey", public_key);
     await pyodide.runPythonAsync(`
@@ -70,6 +78,7 @@ export async function workerLoadPyodide() {
       os.environ["QLACREF_PC_KEY"] = pc_pubkey
     `);
 
+    setText("Loading rule engine...")
     if (process.env.REACT_APP_MICROPIP_MODULES) {
       const extra_modules = process.env.REACT_APP_MICROPIP_MODULES.split(" ")
       pyodide.globals.set("micropip_extra_modules", extra_modules);

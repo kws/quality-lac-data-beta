@@ -19,6 +19,8 @@ export default function Validator({ validatedData }: ValidatorProps) {
 
   let errorDisplayRef = useRef(null);
 
+  console.log("VALIDATED DATA", validatedData);
+
   // Scroll to top when this renders
   useEffect(() => window.scrollTo(0, 0), [])
 
@@ -43,8 +45,8 @@ export default function Validator({ validatedData }: ValidatorProps) {
    */
   const filteredData = useMemo(() => {
     let filteredData: ParsedData = new Map();
-    validatedData.data.forEach((_, key) => {
-      filteredData.set(key, filterDataToChildId(validatedData.data, selectedChild, key))
+    Object.entries(validatedData.data).forEach((row)=> {
+      filteredData.set(row[0], filterDataToChildId(validatedData.data, selectedChild, row[1]))
     })
     return filteredData;
   }, [validatedData, selectedChild])

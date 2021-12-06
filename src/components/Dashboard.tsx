@@ -28,7 +28,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     (async () => {
-      await loadPyodide();
+      await loadPyodide(setLoadingText);
       event('pyodide', 'loaded')
       setLoadingText("Loading rules...");
       const selectedErrors = await loadErrorDefinitions();
@@ -71,10 +71,13 @@ export default function Dashboard() {
 
   const downloadCSVs = useCallback( async () => {
     event('click', 'download')
+    setLoadingText("Creating reports...")
     if (validatedData) {
         await saveErrorSummary('ErrorCounts');
         await saveErrorSummary('ChildErrorSummary');
     }
+    setLoadingText("");
+
 
 
   }, [validatedData])
